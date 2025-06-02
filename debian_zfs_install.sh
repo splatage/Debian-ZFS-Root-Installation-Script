@@ -153,7 +153,7 @@ zpool create -f \
     bpool ${BPOOL_DEVICES}
 
 echo "---"
-if [[ "$ENCRYPT_CHOICE" == "s" ]]; then
+if [[ "$ENCRYPT_CHOICE" == "y" ]]; then
     echo "Creating rpool (encrypted)..."
     echo "rpool (encrypted) command in execution: zpool create -f -o ashift=12 -o autotrim=on -O encryption=on -O keylocation=prompt -O keyformat=passphrase -O acltype=posixacl -O xattr=sa -O dnodesize=auto -O compression=lz4 -O normalization=formD -O relatime=on -O canmount=off -O mountpoint=/ -R /mnt rpool ${RPOOL_DEVICES}"
     zpool create -f \
