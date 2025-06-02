@@ -35,7 +35,7 @@ This repository provides a Bash script to automate the installation of Debian Bo
 
 ## Prerequisites
 
-* **Live Debian Environment**: This script is designed to be run from a Debian-based live environment (e.g., Debian Live or a similar rescue disk).
+* **Live Debian Environment**: This script is designed to be run from a Debian-based live environment (e.g., [Debian Live](https://cdimage.debian.org/debian-cd/current-live/amd64/iso-hybrid/) or a similar rescue disk).
 * **Internet Connection**: An active internet connection is required for `debootstrap` and package installations.
 * **`lsblk`**: Ensure `lsblk` is available for disk detection.
 * **`sgdisk`**: Ensure `sgdisk` (from `gdisk` package) is available for partitioning.
