@@ -72,6 +72,7 @@ This repository provides a Bash script to automate the installation of Debian Bo
 7.  **Follow the Prompts**: The script will guide you through the following steps:
     * **Disk Selection**: Choose the physical disks where you want to install Debian ZFS. **Be extremely careful here, as all data on the selected disks will be ERASED.**
     * **Confirmation**: A strong warning will appear to confirm the destructive operation.
+    * **RAID Level**: Choose the RAID level when multiple disks are selected.
     * **Booting Type**: Select between BIOS (Legacy) and UEFI booting.
     * **Encrypted Root Pool**: Decide if you want an encrypted `rpool`. If selected, you will be prompted for a passphrase later.
     * **Root Password**: You will be prompted to set the root password for the new system.
