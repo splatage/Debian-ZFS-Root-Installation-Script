@@ -81,6 +81,30 @@ read -rp "Enter 'y' for yes, 'n' for no (y/N): " ENCRYPT_CHOICE
 ENCRYPT_CHOICE=${ENCRYPT_CHOICE,,}
 echo "---"
 
+RAID_TYPE=""
+if [ ${#SELECTED_DISKS[@]} -gt 1 ]; then
+    echo "You have selected multiple disks. How do you want to configure the ZFS pool?"
+    echo "1) Simple Mirror (raid1)"
+    echo "2) RAID10 (striped mirrors)"
+    echo "3) RAIDZ1"
+    echo "4) RAIDZ2"
+    echo "5) RAIDZ3"
+    read -rp "Enter your choice (1-5): " RAID_CHOICE
+
+    case "$RAID_CHOICE" in
+        1) RAID_TYPE="mirror" ;;
+        2) RAID_TYPE="raid10" ;;
+        3) RAID_TYPE="raidz1" ;;
+        4) RAID_TYPE="raidz2" ;;
+        5) RAID_TYPE="raidz3" ;;
+        *)
+            echo "Invalid RAID choice. Defaulting to simple mirror." >&2
+            RAID_TYPE="mirror"
+            ;;
+    esac
+fi
+echo "---"
+
 for disk_path in "${SELECTED_DISKS[@]}"; do
     echo "Processing disk: $disk_path"
 
@@ -94,11 +118,11 @@ for disk_path in "${SELECTED_DISKS[@]}"; do
     case "$BOOT_CHOICE" in
         1)
             echo "Configuring for BIOS (Legacy) booting on $disk_path..."
-            sgdisk -a1 -n1:24K:+1000K -t1:EF02 "$disk_path"
+            sgdisk -a1 -n1:24K:+1000K -t1:EF02 "$disk_path" # BIOS Boot Partition
             ;;
         2)
             echo "Configuring for UEFI booting on $disk_path..."
-            sgdisk -n2:1M:+512M -t2:EF00 "$disk_path"
+            sgdisk -n2:1M:+512M -t2:EF00 "$disk_path" # EFI System Partition
             ;;
         *)
             echo "Invalid booting choice for $disk_path. No boot partition created." >&2
@@ -107,10 +131,10 @@ for disk_path in "${SELECTED_DISKS[@]}"; do
     esac
 
     echo "Creating data partition (Linux ZFS for bpool) on $disk_path..."
-    sgdisk -n3:0:+1G -t3:BF01 "$disk_path"
+    sgdisk -n3:0:+1G -t3:BF01 "$disk_path" # bpool partition (for /boot)
 
     echo "Creating data partition (Linux ZFS for rpool) on $disk_path..."
-    sgdisk -n4:0:0 -t4:BF00 "$disk_path"
+    sgdisk -n4:0:0 -t4:BF00 "$disk_path" # rpool partition (for /)
 
     echo "Partitioning on $disk_path completed."
 done
@@ -127,14 +151,52 @@ case "$BOOT_CHOICE" in
     2) BOOT_PARTITION_NUMBER=$EFI_PARTITION_NUMBER ;;
 esac
 
-for disk_path in "${SELECTED_DISKS[@]}"; do
-    BPOOL_DEVICES+=" ${disk_path}${BPOOL_PARTITION_NUMBER}"
-    RPOOL_DEVICES+=" ${disk_path}${RPOOL_PARTITION_NUMBER}"
-done
+if [ ${#SELECTED_DISKS[@]} -eq 1 ]; then
+    BPOOL_DEVICES="${SELECTED_DISKS[0]}${BPOOL_PARTITION_NUMBER}"
+    RPOOL_DEVICES="${SELECTED_DISKS[0]}${RPOOL_PARTITION_NUMBER}"
+elif [ ${#SELECTED_DISKS[@]} -gt 1 ]; then
+    case "$RAID_TYPE" in
+        mirror)
+            BPOOL_DEVICES="mirror"
+            RPOOL_DEVICES="mirror"
+            for disk_path in "${SELECTED_DISKS[@]}"; do
+                BPOOL_DEVICES+=" ${disk_path}${BPOOL_PARTITION_NUMBER}"
+                RPOOL_DEVICES+=" ${disk_path}${RPOOL_PARTITION_NUMBER}"
+            done
+            ;;
+        raid10)
+            if [ $(( ${#SELECTED_DISKS[@]} % 2 )) -ne 0 ]; then
+                echo "Warning: For RAID10, an even number of disks is highly recommended. Proceeding with potentially unoptimized configuration." >&2
+            fi
+            local_bpool_devices=""
+            local_rpool_devices=""
+            for (( i=0; i<${#SELECTED_DISKS[@]}; i+=2 )); do
+                DISK1_BPOOL="${SELECTED_DISKS[$i]}${BPOOL_PARTITION_NUMBER}"
+                DISK1_RPOOL="${SELECTED_DISKS[$i]}${RPOOL_PARTITION_NUMBER}"
 
-if [ ${#SELECTED_DISKS[@]} -gt 1 ]; then
-    BPOOL_DEVICES="mirror${BPOOL_DEVICES}"
-    RPOOL_DEVICES="mirror${RPOOL_DEVICES}"
+                if [ $(( i+1 )) -lt ${#SELECTED_DISKS[@]} ]; then
+                    DISK2_BPOOL="${SELECTED_DISKS[$((i+1))]}${BPOOL_PARTITION_NUMBER}"
+                    DISK2_RPOOL="${SELECTED_DISKS[$((i+1))]}${RPOOL_PARTITION_NUMBER}"
+                    local_bpool_devices+=" mirror ${DISK1_BPOOL} ${DISK2_BPOOL}"
+                    local_rpool_devices+=" mirror ${DISK1_RPOOL} ${DISK2_RPOOL}"
+                else
+                    echo "Warning: Disk ${SELECTED_DISKS[$i]} is a single disk in RAID10 configuration, this is not ideal." >&2
+                    local_bpool_devices+=" ${DISK1_BPOOL}"
+                    local_rpool_devices+=" ${DISK1_RPOOL}"
+                fi
+            done
+            BPOOL_DEVICES=$(echo "$local_bpool_devices" | xargs) # Rimuove spazi extra iniziali/finali
+            RPOOL_DEVICES=$(echo "$local_rpool_devices" | xargs) # Rimuove spazi extra iniziali/finali
+            ;;
+        raidz1|raidz2|raidz3)
+            BPOOL_DEVICES="$RAID_TYPE"
+            RPOOL_DEVICES="$RAID_TYPE"
+            for disk_path in "${SELECTED_DISKS[@]}"; do
+                BPOOL_DEVICES+=" ${disk_path}${BPOOL_PARTITION_NUMBER}"
+                RPOOL_DEVICES+=" ${disk_path}${RPOOL_PARTITION_NUMBER}"
+            done
+            ;;
+    esac
 fi
 
 echo "Creating bpool..."
@@ -183,7 +245,7 @@ fi
 echo "---"
 echo "ZFS operations completed."
 
-echo "Starting Debian Bookworm operating system installation phase..."
+echo "Starting Debian 12 (Bookworm) operating system installation phase..."
 
 echo "Creating ZFS filesystems for root (rpool/ROOT) and boot (bpool/BOOT)..."
 zfs create -o canmount=off -o mountpoint=none rpool/ROOT
@@ -376,7 +438,8 @@ elif [[ "$BOOT_CHOICE" == "2" ]]; then
             fi
 
             echo "Executing grub-install on ${DISK_PATH_IN_CHROOT}..."
-            grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=debian --no-nvram --recheck "$DISK_PATH_IN_CHROOT"
+            #grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=debian --no-nvram --recheck "$DISK_PATH_IN_CHROOT"
+            grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=debian --recheck "$DISK_PATH_IN_CHROOT"
 
             echo "GRUB-EFI installation completed for ${DISK_PATH_IN_CHROOT}."
         else
