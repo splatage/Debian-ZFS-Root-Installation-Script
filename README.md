@@ -60,7 +60,7 @@ This repository provides a Bash script to automate the installation of Debian Bo
     ```
 4.  **Download the Script**: Download the script to your live environment:
     ```bash
-    wget https://raw.githubusercontent.com/danfossi/Debian-ZFS-Root-Installation-Script/refs/heads/main/debian_zfs_install.sh
+    wget https://raw.githubusercontent.com/splatage/Debian-ZFS-Root-Installation-Script/refs/heads/main/debian_zfs_install.sh
     ```
 5.  **Make it Executable**:
     ```bash
