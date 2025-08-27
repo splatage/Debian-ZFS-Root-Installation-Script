@@ -55,7 +55,8 @@ This repository provides a Bash script to automate the installation of Debian Bo
     ```bash
     echo "deb http://deb.debian.org/debian bookworm main contrib non-free-firmware" >> /etc/apt/sources.list
     apt-get update
-    apt install --yes debootstrap gdisk zfsutils-linux grub2
+    apt install linux-headers-$(uname -r)
+    apt install --yes debootstrap gdisk zfs-dkms zfsutils-linux grub2 
     ```
 4.  **Download the Script**: Download the script to your live environment:
     ```bash
