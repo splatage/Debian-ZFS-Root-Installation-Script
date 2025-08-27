@@ -313,12 +313,12 @@ echo "Installing base packages (console-setup, locales) inside chroot..."
 apt install --yes console-setup locales
 
 echo "Reconfiguring locales, tzdata, keyboard-configuration, console-setup inside chroot..."
-echo "it_IT.UTF-8 UTF-8" > /etc/locale.gen
+echo "en_NZ.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen
 
-echo "LANG=it_IT.UTF-8" > /etc/default/locale
-echo "LC_ALL=it_IT.UTF-8" >> /etc/default/locale
-update-locale LANG=it_IT.UTF-8
+echo "LANG=en_NZ.UTF-8" > /etc/default/locale
+echo "LC_ALL=en_NZ.UTF-8" >> /etc/default/locale
+update-locale LANG=en_NZ.UTF-8
 
 ln -sf /usr/share/zoneinfo/Europe/Rome /etc/localtime
 dpkg-reconfigure --frontend noninteractive tzdata
