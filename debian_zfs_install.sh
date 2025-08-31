@@ -244,6 +244,15 @@ fi
 
 echo "---"
 echo "ZFS operations completed."
+echo "Exporting and re-importing bpool and rpool by ID..."
+zpool export bpool
+zpool export rpool
+
+# Let udev finish creating /dev/disk/by-id symlinks
+udevadm settle || sleep 1
+
+zpool import -d /dev/disk/by-id -R /mnt bpool
+zpool import -d /dev/disk/by-id -R /mnt rpool
 
 echo "Starting Debian 12 (Bookworm) operating system installation phase..."
 
