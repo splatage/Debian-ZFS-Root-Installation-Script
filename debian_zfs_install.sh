@@ -379,9 +379,9 @@ WantedBy=zfs-import.target
 EOF_BPOOL_SERVICE
 systemctl enable zfs-import-bpool.service
 
-echo "Installing additional packages: aptitude screen tmux openssh-server curl ..."
-apt install --yes aptitude screen tmux openssh-server curl
-
+echo "Installing additional packages: apache2-utils aptitude bc curl curl ethtool fio git ifenslave ifupdown iperf3 ipmitool jq libnuma1 libnuma-dev man moreutils nmon ntp numactl numad numatop openssh-server pciutils redis redis-tools screen sysbench sysstat tmux wrk ..."
+apt install --yes 
+apache2-utils aptitude bc curl curl ethtool fio git ifenslave ifupdown iperf3 ipmitool jq libnuma1 libnuma-dev man moreutils nmon ntp numactl numad numatop openssh-server pciutils redis redis-tools screen sysbench sysstat tmux wrk
 echo "Configuring root key-only SSH..."
 # Ensure .ssh exists and install the provided pubkey
 mkdir -p /root/.ssh
