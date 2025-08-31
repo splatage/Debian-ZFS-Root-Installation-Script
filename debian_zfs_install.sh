@@ -320,10 +320,13 @@ echo "LANG=en_NZ.UTF-8" > /etc/default/locale
 echo "LC_ALL=en_NZ.UTF-8" >> /etc/default/locale
 update-locale LANG=en_NZ.UTF-8
 
-ln -sf /usr/share/zoneinfo/Europe/Rome /etc/localtime
+# New Zealand timezone
+echo "Pacific/Auckland" > /etc/timezone
+ln -sf /usr/share/zoneinfo/Pacific/Auckland /etc/localtime
 dpkg-reconfigure --frontend noninteractive tzdata
 
-echo 'KEYMAP="it"' > /etc/vconsole.conf
+
+echo 'KEYMAP="us"' > /etc/vconsole.conf
 dpkg-reconfigure --frontend noninteractive keyboard-configuration
 
 dpkg-reconfigure --frontend noninteractive console-setup
@@ -367,17 +370,41 @@ WantedBy=zfs-import.target
 EOF_BPOOL_SERVICE
 systemctl enable zfs-import-bpool.service
 
-echo "Installing additional packages: aptitude vim zsh screen tmux openssh-server..."
-apt install --yes aptitude vim zsh screen tmux openssh-server
+echo "Installing additional packages: aptitude screen tmux openssh-server curl ..."
+apt install --yes aptitude screen tmux openssh-server curl
 
-echo "Enabling SSH login for root..."
-sed -i 's/^#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-sed -i 's/^PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-echo "Restarting SSH service to apply changes (if already running)..."
-systemctl restart sshd || true
+echo "Configuring root key-only SSH..."
+# Ensure .ssh exists and install the provided pubkey
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+cat > /root/.ssh/authorized_keys <<'EOF_KEY'
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDuvy5rjZTWJjWmqm914KD/AKmjX/LEp04taj3aOpfGtbdc7i57d16EimGVsBaHx9xVoVxUNFBZGS4pqAwlyzI86Ttnw5+kl33V+Y71V0pUQ51h443c+ufZFe2lXI5PULboYR0FfRz3/hmCyLdj5XGR5QbTNyuKRd4VBa0OmmB7ODv1MdN+tmiDNDvcZ4wJ5WCay6x3bQJjPDdvYtCMtuQSCHSvZL1n2QW0jlUjUGcbfxyhvfXr7NN8xSz6zT3lj8azfWdMPyyfcX7b9Vu2S0vmjlRSpBKqXz/ifqTEwNEGAUcR7d9S24AqLQ8gHupxKYBTyypGDoNMFVZ5vlM6hzyllD936Tsva2/85sJECELkrN2FFi8EQPKNgFZ+pNavhwcHWNiLF6rk68GEc3BQDqZ12Ei9cqAEZ5sOhTTCYcoK6+paPa+j2+zsgJ/Ct70ZN82J3mETCHxntKvXx0VxxCWH/5M+jhRnJR/XpkJb4kadm3EKSCurwdMfmPLN6RP8NW0=
+EOF_KEY
+chmod 600 /root/.ssh/authorized_keys
+chown -R root:root /root/.ssh
 
-echo "Setting zsh as default shell for root..."
-chsh -s /bin/zsh root
+# Harden sshd via drop-in, do not edit main config
+install -o root -g root -m 0644 /dev/stdin /etc/ssh/sshd_config.d/00-root-keyonly.conf <<'EOF_SSHD'
+# Managed by installer
+Port 22
+Protocol 2
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+X11Forwarding no
+AllowTcpForwarding no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+LoginGraceTime 20
+MaxAuthTries 3
+UseDNS no
+AllowAgentForwarding no
+PrintLastLog yes
+EOF_SSHD
+
+systemctl enable ssh
+systemctl restart ssh || true
 
 echo "Setting rpool/ROOT/debian as root filesystem..."
 zfs set canmount=noauto rpool/ROOT/debian
