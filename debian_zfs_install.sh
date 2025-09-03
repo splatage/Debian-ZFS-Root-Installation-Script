@@ -5,7 +5,7 @@ DISKS=$(lsblk -ndo NAME,SIZE,TYPE,MODEL | grep -v "loop" | grep -v "sr" | awk '{
 if [ -z "$DISKS" ]; then
     echo "Attempting alternative disk detection..." >&2
     DISKS=$(lsblk -ndo NAME | grep -v "loop" | grep -v "sr" | while read -r LINE; do
-        if [[ "$LINE" =~ ^[shv]d[a-z]$ ]]; then
+        if [[ "$LINE" =~ ^[shv]d[a-z]$ || "$LINE" =~ ^nvme[0-9]+n[0-9]+$ ]]; then
             echo "$LINE"
         fi
     done)
@@ -151,17 +151,28 @@ case "$BOOT_CHOICE" in
     2) BOOT_PARTITION_NUMBER=$EFI_PARTITION_NUMBER ;;
 esac
 
+# ---- NVMe-safe partition path helper ----
+partpath() {
+  local disk="$1" part="$2"
+  case "$disk" in
+    /dev/nvme*n*) printf "%sp%s" "$disk" "$part" ;;
+    *)             printf "%s%s"  "$disk" "$part" ;;
+  esac
+}
+# -----------------------------------------
+
+# Build device lists (NVMe-safe)
 if [ ${#SELECTED_DISKS[@]} -eq 1 ]; then
-    BPOOL_DEVICES="${SELECTED_DISKS[0]}${BPOOL_PARTITION_NUMBER}"
-    RPOOL_DEVICES="${SELECTED_DISKS[0]}${RPOOL_PARTITION_NUMBER}"
+    BPOOL_DEVICES="$(partpath "${SELECTED_DISKS[0]}" "${BPOOL_PARTITION_NUMBER}")"
+    RPOOL_DEVICES="$(partpath "${SELECTED_DISKS[0]}" "${RPOOL_PARTITION_NUMBER}")"
 elif [ ${#SELECTED_DISKS[@]} -gt 1 ]; then
     case "$RAID_TYPE" in
         mirror)
             BPOOL_DEVICES="mirror"
             RPOOL_DEVICES="mirror"
             for disk_path in "${SELECTED_DISKS[@]}"; do
-                BPOOL_DEVICES+=" ${disk_path}${BPOOL_PARTITION_NUMBER}"
-                RPOOL_DEVICES+=" ${disk_path}${RPOOL_PARTITION_NUMBER}"
+                BPOOL_DEVICES+=" $(partpath "$disk_path" "$BPOOL_PARTITION_NUMBER")"
+                RPOOL_DEVICES+=" $(partpath "$disk_path" "$RPOOL_PARTITION_NUMBER")"
             done
             ;;
         raid10)
@@ -171,29 +182,29 @@ elif [ ${#SELECTED_DISKS[@]} -gt 1 ]; then
             local_bpool_devices=""
             local_rpool_devices=""
             for (( i=0; i<${#SELECTED_DISKS[@]}; i+=2 )); do
-                DISK1_BPOOL="${SELECTED_DISKS[$i]}${BPOOL_PARTITION_NUMBER}"
-                DISK1_RPOOL="${SELECTED_DISKS[$i]}${RPOOL_PARTITION_NUMBER}"
+                D1B="$(partpath "${SELECTED_DISKS[$i]}"       "$BPOOL_PARTITION_NUMBER")"
+                D1R="$(partpath "${SELECTED_DISKS[$i]}"       "$RPOOL_PARTITION_NUMBER")"
 
                 if [ $(( i+1 )) -lt ${#SELECTED_DISKS[@]} ]; then
-                    DISK2_BPOOL="${SELECTED_DISKS[$((i+1))]}${BPOOL_PARTITION_NUMBER}"
-                    DISK2_RPOOL="${SELECTED_DISKS[$((i+1))]}${RPOOL_PARTITION_NUMBER}"
-                    local_bpool_devices+=" mirror ${DISK1_BPOOL} ${DISK2_BPOOL}"
-                    local_rpool_devices+=" mirror ${DISK1_RPOOL} ${DISK2_RPOOL}"
+                    D2B="$(partpath "${SELECTED_DISKS[$((i+1))]}" "$BPOOL_PARTITION_NUMBER")"
+                    D2R="$(partpath "${SELECTED_DISKS[$((i+1))]}" "$RPOOL_PARTITION_NUMBER")"
+                    local_bpool_devices+=" mirror ${D1B} ${D2B}"
+                    local_rpool_devices+=" mirror ${D1R} ${D2R}"
                 else
                     echo "Warning: Disk ${SELECTED_DISKS[$i]} is a single disk in RAID10 configuration, this is not ideal." >&2
-                    local_bpool_devices+=" ${DISK1_BPOOL}"
-                    local_rpool_devices+=" ${DISK1_RPOOL}"
+                    local_bpool_devices+=" ${D1B}"
+                    local_rpool_devices+=" ${D1R}"
                 fi
             done
-            BPOOL_DEVICES=$(echo "$local_bpool_devices" | xargs) # Rimuove spazi extra iniziali/finali
-            RPOOL_DEVICES=$(echo "$local_rpool_devices" | xargs) # Rimuove spazi extra iniziali/finali
+            BPOOL_DEVICES=$(echo "$local_bpool_devices" | xargs)
+            RPOOL_DEVICES=$(echo "$local_rpool_devices" | xargs)
             ;;
         raidz1|raidz2|raidz3)
             BPOOL_DEVICES="$RAID_TYPE"
             RPOOL_DEVICES="$RAID_TYPE"
             for disk_path in "${SELECTED_DISKS[@]}"; do
-                BPOOL_DEVICES+=" ${disk_path}${BPOOL_PARTITION_NUMBER}"
-                RPOOL_DEVICES+=" ${disk_path}${RPOOL_PARTITION_NUMBER}"
+                BPOOL_DEVICES+=" $(partpath "$disk_path" "$BPOOL_PARTITION_NUMBER")"
+                RPOOL_DEVICES+=" $(partpath "$disk_path" "$RPOOL_PARTITION_NUMBER")"
             done
             ;;
     esac
@@ -306,6 +317,15 @@ BOOT_CHOICE="$BOOT_CHOICE"
 IFS=' ' read -r -a SELECTED_DISKS_ARRAY <<< "$SELECTED_DISKS_STR"
 EFI_PARTITION_NUMBER="$EFI_PARTITION_NUMBER"
 
+# NVMe-safe partition path helper inside chroot
+ch_partpath() {
+  local disk="$1" part="$2"
+  case "$disk" in
+    /dev/nvme*n*) printf "%sp%s" "$disk" "$part" ;;
+    *)             printf "%s%s"  "$disk" "$part" ;;
+  esac
+}
+
 echo "Updating packages inside chroot..."
 apt update
 
@@ -313,17 +333,19 @@ echo "Installing base packages (console-setup, locales) inside chroot..."
 apt install --yes console-setup locales
 
 echo "Reconfiguring locales, tzdata, keyboard-configuration, console-setup inside chroot..."
-echo "it_IT.UTF-8 UTF-8" > /etc/locale.gen
+echo "en_NZ.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen
 
-echo "LANG=it_IT.UTF-8" > /etc/default/locale
-echo "LC_ALL=it_IT.UTF-8" >> /etc/default/locale
-update-locale LANG=it_IT.UTF-8
+echo "LANG=en_NZ.UTF-8" > /etc/default/locale
+echo "LC_ALL=en_NZ.UTF-8" >> /etc/default/locale
+update-locale LANG=en_NZ.UTF-8
 
-ln -sf /usr/share/zoneinfo/Europe/Rome /etc/localtime
+# New Zealand timezone
+echo "Pacific/Auckland" > /etc/timezone
+ln -sf /usr/share/zoneinfo/Pacific/Auckland /etc/localtime
 dpkg-reconfigure --frontend noninteractive tzdata
 
-echo 'KEYMAP="it"' > /etc/vconsole.conf
+echo 'KEYMAP="us"' > /etc/vconsole.conf
 dpkg-reconfigure --frontend noninteractive keyboard-configuration
 
 dpkg-reconfigure --frontend noninteractive console-setup
@@ -367,17 +389,41 @@ WantedBy=zfs-import.target
 EOF_BPOOL_SERVICE
 systemctl enable zfs-import-bpool.service
 
-echo "Installing additional packages: aptitude vim zsh screen tmux openssh-server..."
-apt install --yes aptitude vim zsh screen tmux openssh-server
+echo "Installing additional packages: apache2-utils aptitude bc curl curl ethtool fio git ifenslave ifupdown iperf3 ipmitool jq libnuma1 libnuma-dev man moreutils nmon ntp numactl numad numatop openssh-server pciutils redis redis-tools screen sysbench sysstat tmux wrk ..."
+apt install --yes apache2-utils aptitude bc curl curl ethtool fio git ifenslave ifupdown iperf3 ipmitool jq libnuma1 libnuma-dev man moreutils nmon ntp numactl numad numatop openssh-server pciutils redis redis-tools screen sysbench sysstat tmux wrk
 
-echo "Enabling SSH login for root..."
-sed -i 's/^#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-sed -i 's/^PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-echo "Restarting SSH service to apply changes (if already running)..."
-systemctl restart sshd || true
+echo "Configuring root key-only SSH..."
+# Ensure .ssh exists and install the provided pubkey
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+cat > /root/.ssh/authorized_keys <<'EOF_KEY'
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDuvy5rjZTWJjWmqm914KD/AKmjX/LEp04taj3aOpfGtbdc7i57d16EimGVsBaHx9xVoVxUNFBZGS4pqAwlyzI86Ttnw5+kl33V+Y71V0pUQ51h443c+ufZFe2lXI5PULboYR0FfRz3/hmCyLdj5XGR5QbTNyuKRd4VBa0OmmB7ODv1MdN+tmiDNDvcZ4wJ5WCay6x3bQJjPDdvYtCMtuQSCHSvZL1n2QW0jlUjUGcbfxyhvfXr7NN8xSz6zT3lj8azfWdMPyyfcX7b9Vu2S0vmjlRSpBKqXz/ifqTEwNEGAUcR7d9S24AqLQ8gHupxKYBTyypGDoNMFVZ5vlM6hzyllD936Tsva2/85sJECELkrN2FFi8EQPKNgFZ+pNavhwcHWNiLF6rk68GEc3BQDqZ12Ei9cqAEZ5sOhTTCYcoK6+paPa+j2+zsgJ/Ct70ZN82J3mETCHxntKvXx0VxxCWH/5M+jhRnJR/XpkJb4kadm3EKSCurwdMfmPLN6RP8NW0=
+EOF_KEY
+chmod 600 /root/.ssh/authorized_keys
+chown -R root:root /root/.ssh
 
-echo "Setting zsh as default shell for root..."
-chsh -s /bin/zsh root
+# Harden sshd via drop-in, do not edit main config
+install -o root -g root -m 0644 /dev/stdin /etc/ssh/sshd_config.d/00-root-keyonly.conf <<'EOF_SSHD'
+# Managed by installer
+Port 22
+Protocol 2
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+X11Forwarding no
+AllowTcpForwarding no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+LoginGraceTime 20
+MaxAuthTries 3
+UseDNS no
+AllowAgentForwarding no
+PrintLastLog yes
+EOF_SSHD
+
+systemctl enable ssh
+systemctl restart ssh || true
 
 echo "Setting rpool/ROOT/debian as root filesystem..."
 zfs set canmount=noauto rpool/ROOT/debian
@@ -415,7 +461,7 @@ elif [[ "$BOOT_CHOICE" == "2" ]]; then
     mkdir -p /boot/efi
 
     for DISK_PATH_IN_CHROOT in "${SELECTED_DISKS_ARRAY[@]}"; do
-        EFI_PART_IN_CHROOT="${DISK_PATH_IN_CHROOT}${EFI_PARTITION_NUMBER}"
+        EFI_PART_IN_CHROOT="$(ch_partpath "${DISK_PATH_IN_CHROOT}" "${EFI_PARTITION_NUMBER}")"
         echo "Processing EFI partition: ${EFI_PART_IN_CHROOT}"
 
         if [ -b "${EFI_PART_IN_CHROOT}" ]; then
